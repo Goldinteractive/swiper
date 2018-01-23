@@ -7,7 +7,7 @@
  *
  * Released under the MIT License
  *
- * Released on: January 13, 2018
+ * Released on: January 23, 2018
  */
 
 (function (global, factory) {
@@ -1821,7 +1821,7 @@ var setTransition = function (duration, byController) {
   swiper.emit('setTransition', duration, byController);
 };
 
-var transitionStart = function (runCallbacks) {
+var transitionStart = function (runCallbacks, direction) {
   if ( runCallbacks === void 0 ) runCallbacks = true;
 
   var swiper = this;
@@ -1831,12 +1831,23 @@ var transitionStart = function (runCallbacks) {
   if (params.autoHeight) {
     swiper.updateAutoHeight();
   }
+
+  var dir = direction;
+  if (!dir) {
+    if (activeIndex > previousIndex) { dir = 'next'; }
+    else if (activeIndex < previousIndex) { dir = 'prev'; }
+    else { dir = 'reset'; }
+  }
+
   swiper.emit('transitionStart');
 
-  if (!runCallbacks) { return; }
-  if (activeIndex !== previousIndex) {
+  if (runCallbacks && activeIndex !== previousIndex) {
+    if (dir === 'reset') {
+      swiper.emit('slideResetTransitionStart');
+      return;
+    }
     swiper.emit('slideChangeTransitionStart');
-    if (activeIndex > previousIndex) {
+    if (dir === 'next') {
       swiper.emit('slideNextTransitionStart');
     } else {
       swiper.emit('slidePrevTransitionStart');
@@ -1844,7 +1855,7 @@ var transitionStart = function (runCallbacks) {
   }
 };
 
-var transitionEnd$1 = function (runCallbacks) {
+var transitionEnd$1 = function (runCallbacks, direction) {
   if ( runCallbacks === void 0 ) runCallbacks = true;
 
   var swiper = this;
@@ -1853,15 +1864,25 @@ var transitionEnd$1 = function (runCallbacks) {
   swiper.animating = false;
   swiper.setTransition(0);
 
+  var dir = direction;
+  if (!dir) {
+    if (activeIndex > previousIndex) { dir = 'next'; }
+    else if (activeIndex < previousIndex) { dir = 'prev'; }
+    else { dir = 'reset'; }
+  }
+
   swiper.emit('transitionEnd');
-  if (runCallbacks) {
-    if (activeIndex !== previousIndex) {
-      swiper.emit('slideChangeTransitionEnd');
-      if (activeIndex > previousIndex) {
-        swiper.emit('slideNextTransitionEnd');
-      } else {
-        swiper.emit('slidePrevTransitionEnd');
-      }
+
+  if (runCallbacks && activeIndex !== previousIndex) {
+    if (dir === 'reset') {
+      swiper.emit('slideResetTransitionEnd');
+      return;
+    }
+    swiper.emit('slideChangeTransitionEnd');
+    if (dir === 'next') {
+      swiper.emit('slideNextTransitionEnd');
+    } else {
+      swiper.emit('slidePrevTransitionEnd');
     }
   }
 };
@@ -1909,9 +1930,8 @@ var slideTo = function (index, speed, runCallbacks, internal) {
       }
     }
   }
-
   // Directions locks
-  if (swiper.initialized) {
+  if (swiper.initialized && slideIndex !== activeIndex) {
     if (!swiper.allowSlideNext && translate < swiper.translate && translate < swiper.minTranslate()) {
       return false;
     }
@@ -1919,6 +1939,12 @@ var slideTo = function (index, speed, runCallbacks, internal) {
       if ((activeIndex || 0) !== slideIndex) { return false; }
     }
   }
+
+  var direction;
+  if (slideIndex > activeIndex) { direction = 'next'; }
+  else if (slideIndex < activeIndex) { direction = 'prev'; }
+  else { direction = 'reset'; }
+
 
   // Update Index
   if ((rtl && -translate === swiper.translate) || (!rtl && translate === swiper.translate)) {
@@ -1931,6 +1957,10 @@ var slideTo = function (index, speed, runCallbacks, internal) {
     if (params.effect !== 'slide') {
       swiper.setTranslate(translate);
     }
+    if (direction !== 'reset') {
+      swiper.transitionStart(runCallbacks, direction);
+      swiper.transitionEnd(runCallbacks, direction);
+    }
     return false;
   }
 
@@ -1940,20 +1970,20 @@ var slideTo = function (index, speed, runCallbacks, internal) {
     swiper.updateActiveIndex(slideIndex);
     swiper.updateSlidesClasses();
     swiper.emit('beforeTransitionStart', speed, internal);
-    swiper.transitionStart(runCallbacks);
-    swiper.transitionEnd(runCallbacks);
+    swiper.transitionStart(runCallbacks, direction);
+    swiper.transitionEnd(runCallbacks, direction);
   } else {
     swiper.setTransition(speed);
     swiper.setTranslate(translate);
     swiper.updateActiveIndex(slideIndex);
     swiper.updateSlidesClasses();
     swiper.emit('beforeTransitionStart', speed, internal);
-    swiper.transitionStart(runCallbacks);
+    swiper.transitionStart(runCallbacks, direction);
     if (!swiper.animating) {
       swiper.animating = true;
       $wrapperEl.transitionEnd(function () {
         if (!swiper || swiper.destroyed) { return; }
-        swiper.transitionEnd(runCallbacks);
+        swiper.transitionEnd(runCallbacks, direction);
       });
     }
   }
@@ -2113,19 +2143,32 @@ var loopFix = function () {
   var loopedSlides = swiper.loopedSlides;
   var allowSlidePrev = swiper.allowSlidePrev;
   var allowSlideNext = swiper.allowSlideNext;
+  var snapGrid = swiper.snapGrid;
+  var rtl = swiper.rtl;
   var newIndex;
   swiper.allowSlidePrev = true;
   swiper.allowSlideNext = true;
+
+  var snapTranslate = -snapGrid[activeIndex];
+  var diff = snapTranslate - swiper.getTranslate();
+
+
   // Fix For Negative Oversliding
   if (activeIndex < loopedSlides) {
     newIndex = (slides.length - (loopedSlides * 3)) + activeIndex;
     newIndex += loopedSlides;
-    swiper.slideTo(newIndex, 0, false, true);
+    var slideChanged = swiper.slideTo(newIndex, 0, false, true);
+    if (slideChanged && diff !== 0) {
+      swiper.setTranslate((rtl ? -swiper.translate : swiper.translate) - diff);
+    }
   } else if ((params.slidesPerView === 'auto' && activeIndex >= loopedSlides * 2) || (activeIndex > slides.length - (params.slidesPerView * 2))) {
     // Fix For Positive Oversliding
     newIndex = -slides.length + activeIndex + loopedSlides;
     newIndex += loopedSlides;
-    swiper.slideTo(newIndex, 0, false, true);
+    var slideChanged$1 = swiper.slideTo(newIndex, 0, false, true);
+    if (slideChanged$1 && diff !== 0) {
+      swiper.setTranslate((rtl ? -swiper.translate : swiper.translate) - diff);
+    }
   }
   swiper.allowSlidePrev = allowSlidePrev;
   swiper.allowSlideNext = allowSlideNext;
@@ -2777,7 +2820,7 @@ var onTouchEnd = function (event) {
         swiper.updateProgress(afterBouncePosition);
         swiper.setTransition(momentumDuration);
         swiper.setTranslate(newPosition);
-        swiper.transitionStart();
+        swiper.transitionStart(true, swiper.swipeDirection);
         swiper.animating = true;
         $wrapperEl.transitionEnd(function () {
           if (!swiper || swiper.destroyed || !data.allowMomentumBounce) { return; }
@@ -2794,7 +2837,7 @@ var onTouchEnd = function (event) {
         swiper.updateProgress(newPosition);
         swiper.setTransition(momentumDuration);
         swiper.setTranslate(newPosition);
-        swiper.transitionStart();
+        swiper.transitionStart(true, swiper.swipeDirection);
         if (!swiper.animating) {
           swiper.animating = true;
           $wrapperEl.transitionEnd(function () {
@@ -2923,7 +2966,6 @@ var onClick = function (e) {
 
 function attachEvents() {
   var swiper = this;
-
   var params = swiper.params;
   var touchEvents = swiper.touchEvents;
   var el = swiper.el;
@@ -2942,10 +2984,10 @@ function attachEvents() {
 
   // Touch Events
   {
-    if (Support.pointerEvents || Support.prefixedPointerEvents) {
+    if (!Support.touch && (Support.pointerEvents || Support.prefixedPointerEvents)) {
       target.addEventListener(touchEvents.start, swiper.onTouchStart, false);
-      (Support.touch ? target : doc).addEventListener(touchEvents.move, swiper.onTouchMove, capture);
-      (Support.touch ? target : doc).addEventListener(touchEvents.end, swiper.onTouchEnd, false);
+      doc.addEventListener(touchEvents.move, swiper.onTouchMove, capture);
+      doc.addEventListener(touchEvents.end, swiper.onTouchEnd, false);
     } else {
       if (Support.touch) {
         var passiveListener = touchEvents.start === 'touchstart' && Support.passiveListener && params.passiveListeners ? { passive: true, capture: false } : false;
@@ -2982,10 +3024,10 @@ function detachEvents() {
 
   // Touch Events
   {
-    if (Support.pointerEvents || Support.prefixedPointerEvents) {
+    if (!Support.touch && (Support.pointerEvents || Support.prefixedPointerEvents)) {
       target.removeEventListener(touchEvents.start, swiper.onTouchStart, false);
-      (Support.touch ? target : doc).removeEventListener(touchEvents.move, swiper.onTouchMove, capture);
-      (Support.touch ? target : doc).removeEventListener(touchEvents.end, swiper.onTouchEnd, false);
+      doc.removeEventListener(touchEvents.move, swiper.onTouchMove, capture);
+      doc.removeEventListener(touchEvents.end, swiper.onTouchEnd, false);
     } else {
       if (Support.touch) {
         var passiveListener = touchEvents.start === 'onTouchStart' && Support.passiveListener && params.passiveListeners ? { passive: true, capture: false } : false;
@@ -4092,10 +4134,6 @@ var Keyboard = {
       if (swiper.$el.parents(("." + (swiper.params.slideClass))).length > 0 && swiper.$el.parents(("." + (swiper.params.slideActiveClass))).length === 0) {
         return undefined;
       }
-      var windowScroll = {
-        left: win.pageXOffset,
-        top: win.pageYOffset,
-      };
       var windowWidth = win.innerWidth;
       var windowHeight = win.innerHeight;
       var swiperOffset = swiper.$el.offset();
@@ -4108,8 +4146,8 @@ var Keyboard = {
       for (var i = 0; i < swiperCoord.length; i += 1) {
         var point = swiperCoord[i];
         if (
-          point[0] >= windowScroll.left && point[0] <= windowScroll.left + windowWidth &&
-            point[1] >= windowScroll.top && point[1] <= windowScroll.top + windowHeight
+          point[0] >= 0 && point[0] <= windowWidth &&
+          point[1] >= 0 && point[1] <= windowHeight
         ) {
           inView = true;
         }
@@ -5048,28 +5086,61 @@ var Scrollbar = {
     var swiper = this;
     if (!swiper.params.scrollbar.el) { return; }
     var scrollbar = swiper.scrollbar;
+    var touchEvents = swiper.touchEvents;
+    var params = swiper.params;
     var $el = scrollbar.$el;
-    var target = Support.touch ? $el[0] : document;
-    $el.on(swiper.scrollbar.dragEvents.start, swiper.scrollbar.onDragStart);
-    $$1(target).on(swiper.scrollbar.dragEvents.move, swiper.scrollbar.onDragMove);
-    $$1(target).on(swiper.scrollbar.dragEvents.end, swiper.scrollbar.onDragEnd);
+    var target = $el[0];
+    var activeListener = Support.passiveListener && params.passiveListener ? { passive: false, capture: false } : false;
+    var passiveListener = Support.passiveListener && params.passiveListener ? { passive: true, capture: false } : false;
+    if (!Support.touch && (Support.pointerEvents || Support.prefixedPointerEvents)) {
+      target.addEventListener(touchEvents.start, swiper.scrollbar.onDragStart, activeListener);
+      document.addEventListener(touchEvents.move, swiper.scrollbar.onDragMove, activeListener);
+      document.addEventListener(touchEvents.end, swiper.scrollbar.onDragEnd, passiveListener);
+    } else {
+      if (Support.touch) {
+        target.addEventListener(touchEvents.start, swiper.scrollbar.onDragStart, activeListener);
+        target.addEventListener(touchEvents.move, swiper.scrollbar.onDragMove, activeListener);
+        target.addEventListener(touchEvents.end, swiper.scrollbar.onDragEnd, passiveListener);
+      }
+      if ((params.simulateTouch && !Device.ios && !Device.android) || (params.simulateTouch && !Support.touch && Device.ios)) {
+        target.addEventListener('mousedown', swiper.scrollbar.onDragStart, activeListener);
+        document.addEventListener('mousemove', swiper.scrollbar.onDragMove, activeListener);
+        document.addEventListener('mouseup', swiper.scrollbar.onDragEnd, passiveListener);
+      }
+    }
   },
   disableDraggable: function disableDraggable() {
     var swiper = this;
     if (!swiper.params.scrollbar.el) { return; }
     var scrollbar = swiper.scrollbar;
+    var touchEvents = swiper.touchEvents;
+    var params = swiper.params;
     var $el = scrollbar.$el;
-    var target = Support.touch ? $el[0] : document;
-    $el.off(swiper.scrollbar.dragEvents.start);
-    $$1(target).off(swiper.scrollbar.dragEvents.move);
-    $$1(target).off(swiper.scrollbar.dragEvents.end);
+    var target = $el[0];
+    var activeListener = Support.passiveListener && params.passiveListener ? { passive: false, capture: false } : false;
+    var passiveListener = Support.passiveListener && params.passiveListener ? { passive: true, capture: false } : false;
+    if (!Support.touch && (Support.pointerEvents || Support.prefixedPointerEvents)) {
+      target.removeEventListener(touchEvents.start, swiper.scrollbar.onDragStart, activeListener);
+      document.removeEventListener(touchEvents.move, swiper.scrollbar.onDragMove, activeListener);
+      document.removeEventListener(touchEvents.end, swiper.scrollbar.onDragEnd, passiveListener);
+    } else {
+      if (Support.touch) {
+        target.removeEventListener(touchEvents.start, swiper.scrollbar.onDragStart, activeListener);
+        target.removeEventListener(touchEvents.move, swiper.scrollbar.onDragMove, activeListener);
+        target.removeEventListener(touchEvents.end, swiper.scrollbar.onDragEnd, passiveListener);
+      }
+      if ((params.simulateTouch && !Device.ios && !Device.android) || (params.simulateTouch && !Support.touch && Device.ios)) {
+        target.removeEventListener('mousedown', swiper.scrollbar.onDragStart, activeListener);
+        document.removeEventListener('mousemove', swiper.scrollbar.onDragMove, activeListener);
+        document.removeEventListener('mouseup', swiper.scrollbar.onDragEnd, passiveListener);
+      }
+    }
   },
   init: function init() {
     var swiper = this;
     if (!swiper.params.scrollbar.el) { return; }
     var scrollbar = swiper.scrollbar;
     var $swiperEl = swiper.$el;
-    var touchEvents = swiper.touchEvents;
     var params = swiper.params.scrollbar;
 
     var $el = $$1(params.el);
@@ -5082,17 +5153,6 @@ var Scrollbar = {
       $dragEl = $$1('<div class="swiper-scrollbar-drag"></div>');
       $el.append($dragEl);
     }
-
-    swiper.scrollbar.dragEvents = (function dragEvents() {
-      if ((swiper.params.simulateTouch === false && !Support.touch)) {
-        return {
-          start: 'mousedown',
-          move: 'mousemove',
-          end: 'mouseup',
-        };
-      }
-      return touchEvents;
-    }());
 
     Utils.extend(scrollbar, {
       $el: $el,
@@ -5282,6 +5342,7 @@ var Parallax$1 = {
   on: {
     beforeInit: function beforeInit() {
       var swiper = this;
+      if (!swiper.params.parallax.enabled) { return; }
       swiper.params.watchSlidesProgress = true;
     },
     init: function init() {
